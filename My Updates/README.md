@@ -1,5 +1,8 @@
 ## PPT content:
 
+Data Overload, Insights Underload
+- Creators & businesses drowning in metrics but starving for actionable intelligence
+
 
 ---
 
