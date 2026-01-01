@@ -4,3 +4,4 @@
 - Sidebar
   - New Chat
   - Dashboard
+  - Calendar
