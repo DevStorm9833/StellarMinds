@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Dashboard - Content Strategy</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+        .transition-width { transition-property: width; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 300ms; }
+        
+        /* Custom Inward Card Styling */
+        .card-inward {
+            background-color: #f1f5f9;
+            box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06);
+            border: 1px solid #e2e8f0;
+        }
+
+        .post-marker {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .post-marker:hover {
+            transform: scale(1.2);
+        }
+
+        /* Animation for content list */
+        .fade-in-up {
+            animation: fadeInUp 0.4s ease-out forwards;
+        }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div id="app" class="min-h-screen flex">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="fixed left-0 top-0 h-full bg-slate-900 text-white z-50 flex flex-col transition-width duration-300 w-20 overflow-hidden">
+            <!-- Injected via renderSidebar -->
+        </aside>
+
+        <!-- Main Content -->
+        <main id="main-container" class="ml-20 p-4 lg:p-8 transition-all duration-300 w-full">
+            <header id="header-area" class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <!-- Injected via renderHeader -->
+            </header>
+
+            <div id="dashboard-content" class="space-y-6">
+                <!-- Injected via renderContent -->
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- CONSTANTS & MOCK DATA ---
+        const PLATFORMS = ['LinkedIn', 'Twitter', 'Youtube', 'Facebook', 'Instagram', 'Threads'];
+        const FORMATS = ['Reel', 'Carousel', 'Static', 'Story', 'Short', 'Video'];
+        const TOPICS = ['Product Launch', 'Behind the Scenes', 'Educational', 'Industry News', 'Meme/Humor'];
+
+        function generateMockData() {
+            const data = [];
+            const today = new Date();
+            // High density: 3 posts per day to ensure all time ranges look full
+            for (let i = 0; i < 900; i++) { 
+                const date = new Date(today);
+                date.setDate(today.getDate() - Math.floor(i / 3)); 
+                const platform = PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)];
+                const format = FORMATS[Math.floor(Math.random() * FORMATS.length)];
+                const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
+                
+                let baseReach = Math.floor(Math.random() * 5000) + 1000;
+                let multiplier = 0.05;
+
+                if (platform === 'Threads') {
+                    baseReach *= 1.4;
+                    multiplier = 0.09;
+                } else if (platform === 'Youtube') {
+                    baseReach *= 2.1;
+                }
+
+                const likes = Math.floor(baseReach * multiplier * (Math.random() * 0.5 + 0.8));
+                const comments = Math.floor(likes * 0.1);
+                const shares = Math.floor(likes * 0.05);
+                const engagementRate = ((likes + comments + shares) / baseReach * 100).toFixed(2);
+
+                data.push({
+                    id: `post-${i}`,
+                    date: date.toISOString().split('T')[0],
+                    platform,
+                    format,
+                    topic,
+                    reach: Math.floor(baseReach),
+                    likes,
+                    comments,
+                    shares,
+                    engagementRate: parseFloat(engagementRate),
+                    stayed: Math.floor(Math.random() * 40) + 30,
+                    subs: Math.floor(baseReach * 0.002)
+                });
+            }
+            return data;
+        }
+
+        const MOCK_DATA = generateMockData();
+
+        const state = {
+            activeTab: 'content', 
+            timeRange: 30,
+            selectedPlatform: 'All',
+            selectedMetric: 'Views',
+            isSidebarOpen: false,
+            focusedDay: null 
+        };
+
+        let activeCharts = [];
+
+        const sidebar = document.getElementById('sidebar');
+        const mainContainer = document.getElementById('main-container');
+        const headerArea = document.getElementById('header-area');
+        const contentArea = document.getElementById('dashboard-content');
+
+        const formatNumber = (num) => num.toLocaleString();
+        
+        const getFilteredData = () => {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - state.timeRange);
+            return MOCK_DATA.filter(item => {
+                const itemDate = new Date(item.date);
+                return itemDate >= cutoffDate && (state.selectedPlatform === 'All' || item.platform === state.selectedPlatform);
+            });
+        };
+
+        function getPlatformIcon(p) {
+            const map = {
+                'LinkedIn': { icon: 'linkedin', color: 'text-blue-700' },
+                'Twitter': { icon: 'twitter', color: 'text-sky-400' },
+                'Youtube': { icon: 'youtube', color: 'text-red-600' },
+                'Facebook': { icon: 'facebook', color: 'text-blue-600' },
+                'Instagram': { icon: 'instagram', color: 'text-pink-600' },
+                'Threads': { icon: 'at-sign', color: 'text-slate-900' }
+            };
+            return map[p] || { icon: 'share-2', color: 'text-slate-500' };
+        }
+
+        // --- CUSTOM PLUGIN FOR POST MARKERS (LAYERS ICON) BELOW DATES ---
+        const postMarkersPlugin = {
+            id: 'postMarkers',
+            afterDraw(chart) {
+                if (state.selectedPlatform === 'All') return;
+                const { ctx, chartArea: { bottom }, scales: { x } } = chart;
+                const labels = chart.data.labels;
+                
+                ctx.save();
+                labels.forEach((label, index) => {
+                    const xPos = x.getPixelForValue(index);
+                    
+                    // Subtle line indicator
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#e2e8f0';
+                    ctx.lineWidth = 1;
+                    ctx.moveTo(xPos, bottom);
+                    ctx.lineTo(xPos, bottom + 10);
+                    ctx.stroke();
+
+                    // Draw the "Layers" icon (Stacked boxes matching sidebar icon)
+                    const size = 8;
+                    ctx.strokeStyle = '#6366f1';
+                    ctx.lineWidth = 1.2;
+                    
+                    // Layer 2 (Bottom)
+                    ctx.strokeRect(xPos - 2, bottom + 16, size, size);
+                    
+                    // Layer 1 (Top)
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(xPos - 6, bottom + 12, size, size);
+                    ctx.strokeRect(xPos - 6, bottom + 12, size, size);
+                });
+                ctx.restore();
+            }
+        };
+
+        function initCharts(data) {
+            activeCharts.forEach(c => c.destroy());
+            activeCharts = [];
+
+            Chart.defaults.font.family = 'ui-sans-serif, system-ui';
+            Chart.defaults.color = '#64748b';
+
+            if (state.selectedPlatform !== 'All') {
+                const ctxTrend = document.getElementById('chart-metric-trend');
+                if (ctxTrend) {
+                    const sortedData = [...data].sort((a,b) => new Date(a.date) - new Date(b.date));
+                    const dailyAgg = {};
+                    sortedData.forEach(d => {
+                        if (!dailyAgg[d.date]) dailyAgg[d.date] = { views: 0, likes: 0, subs: 0, eng: 0, count: 0, raw: [] };
+                        dailyAgg[d.date].views += d.reach;
+                        dailyAgg[d.date].likes += d.likes;
+                        dailyAgg[d.date].subs += d.subs;
+                        dailyAgg[d.date].eng += d.engagementRate;
+                        dailyAgg[d.date].count += 1;
+                        dailyAgg[d.date].raw.push(d);
+                    });
+
+                    const labels = Object.keys(dailyAgg);
+                    let chartData = [];
+                    if (state.selectedMetric === 'Views') chartData = labels.map(l => dailyAgg[l].views);
+                    if (state.selectedMetric === 'Likes') chartData = labels.map(l => dailyAgg[l].likes);
+                    if (state.selectedMetric === 'Subscribers') chartData = labels.map(l => dailyAgg[l].subs);
+                    if (state.selectedMetric === 'Eng Rate') chartData = labels.map(l => (dailyAgg[l].eng / dailyAgg[l].count).toFixed(2));
+                    if (state.selectedMetric === 'Posts') chartData = labels.map(l => dailyAgg[l].count);
+
+                    activeCharts.push(new Chart(ctxTrend, {
+                        type: 'line',
+                        data: {
+                            labels: labels.map(l => new Date(l).toLocaleDateString('en-US', {month:'short', day:'numeric'})),
+                            datasets: [{
+                                label: state.selectedMetric,
+                                data: chartData,
+                                borderColor: '#6366f1',
+                                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                                fill: true,
+                                tension: 0.4,
+                                pointRadius: 5,
+                                pointHoverRadius: 8,
+                                pointBackgroundColor: '#ffffff',
+                                pointBorderColor: '#6366f1',
+                                pointBorderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            layout: { padding: { bottom: 45 } }, // Make room for symbols and dates
+                            plugins: { 
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        afterBody: (context) => {
+                                            const index = context[0].dataIndex;
+                                            const count = dailyAgg[labels[index]].count;
+                                            return `\n${count} items published today\nClick to view log`;
+                                        }
+                                    }
+                                }
+                            },
+                            onClick: (evt, elements) => {
+                                if (elements.length > 0) {
+                                    const index = elements[0].index;
+                                    const date = labels[index];
+                                    state.focusedDay = dailyAgg[date].raw;
+                                    renderDayDetails(date);
+                                }
+                            },
+                            scales: {
+                                y: { beginAtZero: true, grid: { color: '#f1f5f9' } },
+                                x: { 
+                                    grid: { display: false },
+                                    ticks: {
+                                        padding: 35 // Push dates below the content symbols
+                                    }
+                                }
+                            }
+                        },
+                        plugins: [postMarkersPlugin]
+                    }));
+                }
+            }
+
+            // Global/Platform Retention Chart
+            const ctxRetention = document.getElementById('chart-retention');
+            if(ctxRetention) {
+                const platformsToRender = state.selectedPlatform === 'All' ? PLATFORMS : [state.selectedPlatform];
+                const stayedData = platformsToRender.map(p => {
+                    const pData = data.filter(d => d.platform === p);
+                    return pData.length ? Math.round(pData.reduce((s,i)=>s+i.stayed, 0) / pData.length) : 0;
+                });
+                const swipedData = stayedData.map(val => 100 - val);
+
+                activeCharts.push(new Chart(ctxRetention, {
+                    type: 'bar',
+                    data: {
+                        labels: platformsToRender,
+                        datasets: [
+                            { label: '% Stayed', data: stayedData, backgroundColor: '#6366f1', borderRadius: 4 },
+                            { label: '% Swiped', data: swipedData, backgroundColor: '#e2e8f0', borderRadius: 4 }
+                        ]
+                    },
+                    options: {
+                        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { position: 'bottom' } },
+                        scales: { x: { stacked: true, max: 100 }, y: { stacked: true } }
+                    },
+                    plugins: [{
+                        id: 'retentionText',
+                        afterDatasetsDraw(chart) {
+                            const { ctx, data } = chart;
+                            ctx.save();
+                            ctx.font = 'bold 11px ui-sans-serif, system-ui';
+                            ctx.fillStyle = '#ffffff';
+                            ctx.textAlign = 'left';
+                            ctx.textBaseline = 'middle';
+                            const meta = chart.getDatasetMeta(0);
+                            meta.data.forEach((bar, index) => {
+                                const value = data.datasets[0].data[index];
+                                if (value > 0) ctx.fillText(`${value}%`, bar.base + 8, bar.y);
+                            });
+                            ctx.restore();
+                        }
+                    }]
+                }));
+            }
+
+            const ctxReach = document.getElementById('chart-format-reach');
+            if(ctxReach) {
+                const reach = FORMATS.map(f => {
+                    const fData = data.filter(d => d.format === f);
+                    return fData.length ? Math.round(fData.reduce((s,i)=>s+i.reach,0)/fData.length) : 0;
+                });
+                activeCharts.push(new Chart(ctxReach, {
+                    type: 'bar',
+                    data: {
+                        labels: FORMATS,
+                        datasets: [{ label: 'Avg Reach', data: reach, backgroundColor: '#10b981', borderRadius: 6 }]
+                    },
+                    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+                }));
+            }
+        }
+
+        function renderDayDetails(dateString) {
+            const container = document.getElementById('day-details-container');
+            if (!container) return;
+            
+            const posts = state.focusedDay || [];
+            const dateFormatted = new Date(dateString).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+            container.innerHTML = `
+                <div class="bg-indigo-50/50 p-6 rounded-2xl border border-indigo-100 fade-in-up">
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="font-bold text-slate-800 text-lg flex items-center gap-2">
+                            <i data-lucide="calendar" class="w-5 h-5 text-indigo-600"></i>
+                            Content Log: ${dateFormatted}
+                        </h3>
+                        <button onclick="document.getElementById('day-details-container').innerHTML=''" class="text-slate-400 hover:text-slate-600">
+                            <i data-lucide="x" class="w-5 h-5"></i>
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        ${posts.map(p => `
+                            <div class="bg-white p-4 rounded-xl border border-indigo-50 shadow-sm flex gap-4 items-start hover:border-indigo-200 transition-colors">
+                                <div class="p-2 bg-indigo-50 rounded text-indigo-600 mt-1">
+                                    <i data-lucide="${p.format === 'Reel' || p.format === 'Short' || p.format === 'Video' ? 'video' : 'layout'}" class="w-4 h-4"></i>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="text-[10px] font-bold text-indigo-600 uppercase tracking-widest mb-1">${p.format}</div>
+                                    <div class="font-semibold text-slate-800 mb-2 truncate">${p.topic}</div>
+                                    <div class="grid grid-cols-3 gap-2 text-[10px] text-slate-500 font-bold uppercase">
+                                        <div><span class="text-slate-400">Reach</span><br>${formatNumber(p.reach)}</div>
+                                        <div><span class="text-slate-400">Likes</span><br>${formatNumber(p.likes)}</div>
+                                        <div><span class="text-slate-400">Eng %</span><br>${p.engagementRate}%</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+            container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function renderSidebar() {
+            const navItems = [
+                { id: 'dashboard', icon: 'bar-chart-2', label: 'Dashboard' },
+                { id: 'overview', icon: 'layout-dashboard', label: 'Overview' },
+                { id: 'content', icon: 'layers', label: 'Content Strategy' },
+                { id: 'audience', icon: 'users', label: 'Audience' },
+                { id: 'ai', icon: 'message-square', label: 'AI Analyst' },
+                { id: 'performance', icon: 'pie-chart', label: 'Performance' },
+            ];
+            const widthClass = state.isSidebarOpen ? 'w-64' : 'w-20';
+            const opacityClass = state.isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0';
+
+            sidebar.className = `fixed left-0 top-0 h-full bg-slate-900 text-white z-50 flex flex-col transition-width duration-300 overflow-hidden ${widthClass}`;
+            sidebar.innerHTML = `
+                <div class="p-6 flex items-center gap-3">
+                    <button onclick="toggleSidebar()" class="p-2 hover:bg-slate-800 rounded-lg transition-colors"><i data-lucide="menu"></i></button>
+                    <span class="font-bold text-lg whitespace-nowrap transition-all duration-300 ${opacityClass}">Socialytics</span>
+                </div>
+                <div class="w-full h-px bg-slate-800"></div>
+                <nav class="px-4 py-4 space-y-2">
+                    ${navItems.map(item => `
+                        <button onclick="setTab('${item.id}')" 
+                            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all overflow-hidden ${state.activeTab === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}">
+                            <i data-lucide="${item.icon}" class="shrink-0 w-5 h-5"></i>
+                            <span class="text-sm font-medium whitespace-nowrap transition-all duration-300 ${opacityClass}">${item.label}</span>
+                        </button>
+                    `).join('')}
+                </nav>
+            `;
+            lucide.createIcons();
+        }
+
+        function renderHeader() {
+            headerArea.innerHTML = `
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-900">Content Strategy</h1>
+                    <p class="text-slate-500 text-sm mt-1">${state.selectedPlatform === 'All' ? 'Cross-platform performance' : 'Detailed drill-down for ' + state.selectedPlatform}</p>
+                </div>
+                <div id="header-controls" class="flex flex-wrap items-center gap-3">
+                    <select onchange="setTimeRange(this.value)" class="bg-white border border-slate-200 px-4 py-2 rounded-lg text-sm font-medium outline-none shadow-sm">
+                        <option value="7" ${state.timeRange == 7 ? 'selected' : ''}>7 Days</option>
+                        <option value="30" ${state.timeRange == 30 ? 'selected' : ''}>30 Days</option>
+                        <option value="90" ${state.timeRange == 90 ? 'selected' : ''}>90 Days</option>
+                    </select>
+                    <select onchange="setPlatform(this.value)" class="bg-white border border-slate-200 px-4 py-2 rounded-lg text-sm font-medium outline-none shadow-sm">
+                        <option value="All">All Platforms</option>
+                        ${PLATFORMS.map(p => `<option value="${p}" ${state.selectedPlatform === p ? 'selected' : ''}>${p}</option>`).join('')}
+                    </select>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function renderContent() {
+            const data = getFilteredData();
+            let html = '';
+
+            if (state.selectedPlatform === 'All') {
+                const totalViews = data.reduce((s,i) => s + i.reach, 0);
+                const totalLikes = data.reduce((s,i) => s + i.likes, 0);
+                const subGrowth = data.reduce((s,i) => s + i.subs, 0);
+
+                html = `
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div class="card-inward p-6 rounded-2xl">
+                            <div class="flex items-center gap-4 mb-2">
+                                <div class="p-2 bg-blue-100 text-blue-600 rounded-lg shadow-sm"><i data-lucide="eye"></i></div>
+                                <span class="text-sm font-bold text-slate-500 uppercase tracking-wider">Total Views</span>
+                            </div>
+                            <div class="text-3xl font-black text-slate-700">${formatNumber(totalViews)}</div>
+                        </div>
+                        <div class="card-inward p-6 rounded-2xl">
+                            <div class="flex items-center gap-4 mb-2">
+                                <div class="p-2 bg-pink-100 text-pink-600 rounded-lg shadow-sm"><i data-lucide="heart"></i></div>
+                                <span class="text-sm font-bold text-slate-500 uppercase tracking-wider">Total Likes</span>
+                            </div>
+                            <div class="text-3xl font-black text-slate-700">${formatNumber(totalLikes)}</div>
+                        </div>
+                        <div class="card-inward p-6 rounded-2xl">
+                            <div class="flex items-center gap-4 mb-2">
+                                <div class="p-2 bg-indigo-100 text-indigo-600 rounded-lg shadow-sm"><i data-lucide="users"></i></div>
+                                <span class="text-sm font-bold text-slate-500 uppercase tracking-wider">Subscribers</span>
+                            </div>
+                            <div class="text-3xl font-black text-slate-700">+${formatNumber(subGrowth)}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${PLATFORMS.map(p => {
+                            const pData = data.filter(d => d.platform === p);
+                            const reach = pData.reduce((s,i)=>s+i.reach,0);
+                            const likes = pData.reduce((s,i)=>s+i.likes,0);
+                            const subs = pData.reduce((s,i)=>s+i.subs,0);
+                            const eng = pData.length ? (pData.reduce((s,i)=>s+i.engagementRate,0)/pData.length).toFixed(1) : 0;
+                            const { icon, color } = getPlatformIcon(p);
+                            return `
+                                <div onclick="setPlatform('${p}')" class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md cursor-pointer transition-all group">
+                                    <div class="flex items-center justify-between mb-5">
+                                        <div class="flex items-center gap-3">
+                                            <div class="p-2 bg-slate-50 rounded-lg group-hover:bg-indigo-50 transition-colors">
+                                                <i data-lucide="${icon}" class="${color} w-6 h-6"></i>
+                                            </div>
+                                            <span class="font-bold text-slate-800 text-lg">${p}</span>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-4 text-slate-600">
+                                        <div><div class="text-[10px] text-slate-400 uppercase font-bold mb-1">Views</div><div class="text-lg font-bold">${formatNumber(reach)}</div></div>
+                                        <div><div class="text-[10px] text-slate-400 uppercase font-bold mb-1">Likes</div><div class="text-lg font-bold">${formatNumber(likes)}</div></div>
+                                        <div><div class="text-[10px] text-slate-400 uppercase font-bold mb-1">Subs</div><div class="text-lg font-bold text-indigo-600">+${formatNumber(subs)}</div></div>
+                                        <div><div class="text-[10px] text-slate-400 uppercase font-bold mb-1">Eng Rate</div><div class="text-lg font-bold">${eng}%</div></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-6">Global Retention</h3>
+                            <div class="h-[300px]"><canvas id="chart-retention"></canvas></div>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-6">Reach by Format</h3>
+                            <div class="h-[300px]"><canvas id="chart-format-reach"></canvas></div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const pData = data;
+                const views = pData.reduce((s,i)=>s+i.reach,0);
+                const likes = pData.reduce((s,i)=>s+i.likes,0);
+                const subs = pData.reduce((s,i)=>s+i.subs,0);
+                const eng = pData.length ? (pData.reduce((s,i)=>s+i.engagementRate,0)/pData.length).toFixed(1) : 0;
+                const posts = pData.length;
+
+                const metricConfigs = [
+                    { id: 'Posts', val: posts, icon: 'file-text' },
+                    { id: 'Views', val: formatNumber(views), icon: 'eye' },
+                    { id: 'Likes', val: formatNumber(likes), icon: 'heart' },
+                    { id: 'Subscribers', val: `+${formatNumber(subs)}`, icon: 'users' },
+                    { id: 'Eng Rate', val: `${eng}%`, icon: 'activity' }
+                ];
+
+                html = `
+                    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                        ${metricConfigs.map(m => `
+                            <div onclick="setMetric('${m.id}')" class="bg-white p-4 rounded-xl border-2 cursor-pointer transition-all ${state.selectedMetric === m.id ? 'border-indigo-600 shadow-lg' : 'border-slate-100 hover:border-indigo-200'}">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <i data-lucide="${m.icon}" class="w-4 h-4 text-slate-400"></i>
+                                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">${m.id}</span>
+                                </div>
+                                <div class="text-xl font-bold text-slate-900">${m.val}</div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                        <div class="flex justify-between items-center mb-6">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-800">${state.selectedPlatform} ${state.selectedMetric} Trend</h3>
+                                <p class="text-xs text-slate-400 font-medium">Click on a data point or the content symbol below the date to see what was posted.</p>
+                            </div>
+                            <div class="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest">${state.selectedMetric}</div>
+                        </div>
+                        <div class="h-[350px]"><canvas id="chart-metric-trend"></canvas></div>
+                    </div>
+
+                    <div id="day-details-container" class="mt-6"></div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-6">Retention Rate</h3>
+                            <div class="h-[250px]"><canvas id="chart-retention"></canvas></div>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-6">Reach by Format</h3>
+                            <div class="h-[250px]"><canvas id="chart-format-reach"></canvas></div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            contentArea.innerHTML = html;
+            lucide.createIcons();
+            setTimeout(() => initCharts(data), 0);
+        }
+
+        function setTab(id) { state.activeTab = id; updateUI(); }
+        function toggleSidebar() { state.isSidebarOpen = !state.isSidebarOpen; renderSidebar(); }
+        function setTimeRange(val) { state.timeRange = parseInt(val); state.focusedDay = null; updateUI(); }
+        function setPlatform(val) { state.selectedPlatform = val; state.selectedMetric = 'Views'; state.focusedDay = null; updateUI(); }
+        function setMetric(val) { state.selectedMetric = val; renderContent(); }
+        function updateUI() { renderSidebar(); renderHeader(); renderContent(); }
+
+        window.onload = updateUI;
+    </script>
+</body>
+</html>
