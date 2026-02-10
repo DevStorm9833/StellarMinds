@@ -1,4 +1,6 @@
-# Social Media Analysis Dashboard — Data-Driven Content Strategy Optimizer
+# Socialytics
+
+Social Media Analysis Dashboard — Data-Driven Content Strategy Optimizer
 
 # Overview
 
