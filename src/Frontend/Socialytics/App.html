@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Dashboard</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Custom scrollbar to match the clean look */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .transition-width {
+            transition-property: width;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+            transition-duration: 300ms;
+        }
+        /* Print styles */
+        @media print {
+            #sidebar, #header-controls {
+                display: none !important;
+            }
+            #main-container {
+                margin-left: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+    <div id="app" class="min-h-screen flex">
+        <!-- Sidebar will be injected here -->
+        <aside id="sidebar" class="fixed left-0 top-0 h-full bg-slate-900 text-white z-50 flex flex-col transition-width duration-300 w-20 overflow-hidden">
+            <!-- Sidebar Content -->
+        </aside>
+
+        <!-- Main Content -->
+        <main id="main-container" class="ml-20 p-4 lg:p-8 transition-all duration-300 w-full">
+            <!-- Header -->
+            <header id="header-area" class="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                <!-- Header Content injected via JS -->
+            </header>
+
+            <!-- Dashboard Content Area -->
+            <div id="dashboard-content" class="space-y-6">
+                <!-- Tab content injected via JS -->
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // --- CONSTANTS & MOCK DATA GENERATOR ---
+        // Updated order as requested: LinkedIn, Twitter, Youtube, Facebook, Instagram, Tiktok
+        const PLATFORMS = ['LinkedIn', 'Twitter', 'Youtube', 'Facebook', 'Instagram', 'TikTok'];
+        const FORMATS = ['Reel', 'Carousel', 'Static', 'Story', 'Short', 'Video'];
+        const TOPICS = ['Product Launch', 'Behind the Scenes', 'Educational', 'Industry News', 'Meme/Humor'];
+
+        function generateMockData() {
+            const data = [];
+            const today = new Date();
+            
+            for (let i = 0; i < 150; i++) { 
+                const date = new Date(today);
+                date.setDate(today.getDate() - (149 - i));
+                
+                const platform = PLATFORMS[Math.floor(Math.random() * PLATFORMS.length)];
+                const format = FORMATS[Math.floor(Math.random() * FORMATS.length)];
+                const topic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
+                
+                // Base engagement factors
+                let baseReach = Math.floor(Math.random() * 5000) + 1000;
+                let engagementMultiplier = 0.05; // 5% base
+
+                if (format === 'Reel' || format === 'Short' || platform === 'TikTok') {
+                    baseReach *= 1.8;
+                    engagementMultiplier = 0.08;
+                } else if (format === 'Carousel') {
+                    engagementMultiplier = 0.07;
+                } else if (platform === 'Youtube') {
+                    baseReach *= 2.5; 
+                    engagementMultiplier = 0.04;
+                } else if (platform === 'LinkedIn') {
+                    baseReach *= 0.8;
+                    engagementMultiplier = 0.03; 
+                }
+
+                const likes = Math.floor(baseReach * engagementMultiplier * (Math.random() * 0.5 + 0.8));
+                const comments = Math.floor(likes * 0.05);
+                const shares = Math.floor(likes * 0.08);
+                const engagementRate = ((likes + comments + shares) / baseReach * 100).toFixed(2);
+
+                data.push({
+                    id: `post-${i}`,
+                    date: date.toISOString().split('T')[0],
+                    platform,
+                    format,
+                    topic,
+                    reach: Math.floor(baseReach),
+                    likes,
+                    comments,
+                    shares,
+                    engagementRate: parseFloat(engagementRate),
+                    title: `${topic} - ${format} on ${platform}`
+                });
+            }
+            return data;
+        }
+
+        const MOCK_DATA = generateMockData();
+
+        // --- STATE MANAGEMENT ---
+        const state = {
+            activeTab: 'dashboard',
+            timeRange: 30,
+            selectedPlatform: 'All',
+            isSidebarOpen: false,
+            // Chat State
+            chatQuery: '',
+            chatMessages: [
+                { role: 'system', content: "Hello! I'm your Data Strategy Assistant. Ask me about your performance, best times to post, or content recommendations." }
+            ],
+            isChatTyping: false
+        };
+
+        // --- CHART INSTANCES (To destroy before re-rendering) ---
+        let activeCharts = [];
+
+        // --- DOM ELEMENTS ---
+        const sidebar = document.getElementById('sidebar');
+        const mainContainer = document.getElementById('main-container');
+        const headerArea = document.getElementById('header-area');
+        const contentArea = document.getElementById('dashboard-content');
+
+        // --- HELPERS ---
+        const formatNumber = (num) => num.toLocaleString();
+        const getFilteredData = () => {
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - state.timeRange);
+            return MOCK_DATA.filter(item => {
+                const itemDate = new Date(item.date);
+                return itemDate >= cutoffDate && (state.selectedPlatform === 'All' || item.platform === state.selectedPlatform);
+            });
+        };
+
+        const getMetrics = (data) => {
+            const totalReach = data.reduce((sum, item) => sum + item.reach, 0);
+            const totalLikes = data.reduce((sum, item) => sum + item.likes, 0);
+            const totalComments = data.reduce((sum, item) => sum + item.comments, 0);
+            const avgEngagement = (data.reduce((sum, item) => sum + item.engagementRate, 0) / (data.length || 1)).toFixed(2);
+            return {
+                reach: formatNumber(totalReach),
+                engagement: `${avgEngagement}%`,
+                interactions: formatNumber(totalLikes + totalComments),
+                posts: data.length
+            };
+        };
+
+        const getPlatformIcon = (p) => {
+            const icons = {
+                'Instagram': 'instagram', 'LinkedIn': 'linkedin', 'Twitter': 'twitter', 
+                'Youtube': 'youtube', 'Facebook': 'facebook', 'TikTok': 'smartphone'
+            };
+            const colors = {
+                'Instagram': 'text-pink-600', 'LinkedIn': 'text-blue-700', 'Twitter': 'text-sky-500', 
+                'Youtube': 'text-red-600', 'Facebook': 'text-blue-600', 'TikTok': 'text-slate-800'
+            };
+            return { icon: icons[p] || 'smartphone', color: colors[p] || 'text-slate-600' };
+        };
+
+        // --- COMPONENT RENDERS ---
+
+        function renderSidebar() {
+            const navItems = [
+                { id: 'dashboard', icon: 'bar-chart-2', label: 'Dashboard' },
+                { id: 'overview', icon: 'layout-dashboard', label: 'Overview' },
+                { id: 'content', icon: 'layers', label: 'Content' },
+                { id: 'audience', icon: 'users', label: 'Audience' },
+                { id: 'ai', icon: 'message-square', label: 'AI Analyst' },
+                { id: 'performance', icon: 'pie-chart', label: 'Performance' },
+            ];
+
+            const widthClass = state.isSidebarOpen ? 'w-64' : 'w-20';
+            const opacityClass = state.isSidebarOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0';
+
+            sidebar.className = `fixed left-0 top-0 h-full bg-slate-900 text-white z-50 flex flex-col transition-width duration-300 overflow-hidden ${widthClass}`;
+            
+            sidebar.innerHTML = `
+                <div class="p-6 flex items-center gap-3">
+                    <button onclick="toggleSidebar()" class="p-2 hover:bg-slate-800 rounded-lg transition-colors">
+                        <i data-lucide="menu" class="text-white"></i>
+                    </button>
+                    <span class="font-bold text-lg tracking-tight whitespace-nowrap overflow-hidden transition-all duration-300 ${opacityClass}">
+                        Socialytics
+                    </span>
+                </div>
+
+                <!-- Divider 1 -->
+                <div class="w-full h-px bg-slate-800"></div>
+
+                <nav class="px-4 py-4 space-y-2">
+                    ${navItems.map(item => `
+                        <button onclick="setTab('${item.id}')" 
+                            class="w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all overflow-hidden ${state.activeTab === item.id ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}"
+                            title="${!state.isSidebarOpen ? item.label : ''}">
+                            <i data-lucide="${item.icon}" class="shrink-0 w-5 h-5"></i>
+                            <span class="text-sm font-medium whitespace-nowrap transition-all duration-300 ${opacityClass}">
+                                ${item.label}
+                            </span>
+                        </button>
+                    `).join('')}
+                </nav>
+
+                <!-- Divider 2 -->
+                <div class="w-full h-px bg-slate-800"></div>
+
+                <div class="p-4 space-y-2">
+                    <button class="w-full flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white transition-colors">
+                        <i data-lucide="user" class="shrink-0 w-5 h-5"></i>
+                        <span class="text-sm font-medium whitespace-nowrap overflow-hidden transition-all duration-300 ${opacityClass}">Profile</span>
+                    </button>
+                </div>
+            `;
+            
+            // Adjust main container margin
+            mainContainer.className = `p-4 lg:p-8 transition-all duration-300 w-full ${state.isSidebarOpen ? 'ml-64' : 'ml-20'}`;
+            lucide.createIcons();
+        }
+
+        function renderHeader() {
+            const titles = {
+                'dashboard': 'Channel Analytics',
+                'overview': 'Executive Overview',
+                'content': 'Content Strategy',
+                'audience': 'Audience Insights',
+                'ai': 'AI Data Analyst',
+                'performance': 'Performance Reports',
+                'full_report': 'Full Analytics Report'
+            };
+
+            headerArea.innerHTML = `
+                <div>
+                    <h1 class="text-2xl font-bold text-slate-900">${titles[state.activeTab]}</h1>
+                    <p class="text-slate-500 text-sm mt-1">Data last updated: Just now</p>
+                </div>
+
+                <div id="header-controls" class="flex flex-wrap items-center gap-3">
+                    <div class="relative">
+                        <select onchange="setTimeRange(this.value)" class="appearance-none bg-white border border-slate-200 pl-4 pr-10 py-2 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="7" ${state.timeRange == 7 ? 'selected' : ''}>Last 7 Days</option>
+                            <option value="30" ${state.timeRange == 30 ? 'selected' : ''}>Last 30 Days</option>
+                            <option value="90" ${state.timeRange == 90 ? 'selected' : ''}>Last 3 Months</option>
+                        </select>
+                        <i data-lucide="chevron-down" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none w-4 h-4"></i>
+                    </div>
+                    
+                    <div class="relative">
+                        <select onchange="setPlatform(this.value)" class="appearance-none bg-white border border-slate-200 pl-4 pr-10 py-2 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            <option value="All" ${state.selectedPlatform === 'All' ? 'selected' : ''}>All Platforms</option>
+                            ${PLATFORMS.map(p => `<option value="${p}" ${state.selectedPlatform === p ? 'selected' : ''}>${p}</option>`).join('')}
+                        </select>
+                        <i data-lucide="filter" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none w-4 h-4"></i>
+                    </div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // --- TAB RENDERING LOGIC ---
+
+        function renderContent() {
+            // Clear existing charts
+            activeCharts.forEach(chart => chart.destroy());
+            activeCharts = [];
+
+            const filteredData = getFilteredData();
+            const metrics = getMetrics(filteredData);
+            let html = '';
+
+            // --- REUSABLE COMPONENT GENERATORS FOR FULL REPORT ---
+            
+            const getDashboardHTML = () => {
+                const platformCards = PLATFORMS.map(p => {
+                    const pData = filteredData.filter(d => d.platform === p);
+                    const reach = pData.reduce((acc, curr) => acc + curr.reach, 0);
+                    const avgEng = pData.length ? (pData.reduce((acc, curr) => acc + curr.engagementRate, 0) / pData.length).toFixed(2) : 0;
+                    const { icon, color } = getPlatformIcon(p);
+
+                    return `
+                    <div class="bg-white p-5 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="p-2 bg-slate-50 rounded-lg">
+                                <i data-lucide="${icon}" class="${color} w-6 h-6"></i>
+                            </div>
+                            <h3 class="font-bold text-slate-800">${p}</h3>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <p class="text-xs text-slate-500 uppercase font-semibold">Reach</p>
+                                <p class="text-lg font-bold text-slate-900">${formatNumber(reach)}</p>
+                            </div>
+                            <div>
+                                <p class="text-xs text-slate-500 uppercase font-semibold">Eng. Rate</p>
+                                <p class="text-lg font-bold text-slate-900">${avgEng}%</p>
+                            </div>
+                        </div>
+                         <div class="mt-4 pt-3 border-t border-slate-50 flex justify-between items-center text-xs text-slate-500">
+                            <span>${pData.length} posts published</span>
+                            <span class="text-emerald-600 flex items-center gap-1"><i data-lucide="arrow-up-right" class="w-3 h-3"></i> Active</span>
+                        </div>
+                    </div>`;
+                }).join('');
+
+                return `
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        ${platformCards}
+                    </div>
+                    <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm mt-6">
+                        <h3 class="text-lg font-bold text-slate-800 mb-6">Cross-Channel Engagement</h3>
+                        <div class="h-[350px] w-full">
+                            <canvas id="chart-dashboard-bar"></canvas>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const getOverviewHTML = () => {
+                return `
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        ${renderKpiCard('Total Reach', metrics.reach, '+12.5%', 'eye', 'up', 'bg-indigo-50 text-indigo-600')}
+                        ${renderKpiCard('Avg. Engagement', metrics.engagement, '+2.4%', 'heart', 'up', 'bg-pink-50 text-pink-600')}
+                        ${renderKpiCard('Interactions', metrics.interactions, '-1.2%', 'message-circle', 'down', 'bg-emerald-50 text-emerald-600')}
+                        ${renderKpiCard('Total Posts', metrics.posts, '+5', 'share-2', 'up', 'bg-blue-50 text-blue-600')}
+                    </div>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
+                        <div class="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-6">Aggregate Growth</h3>
+                            <div class="h-[300px] w-full">
+                                <canvas id="chart-overview-area"></canvas>
+                            </div>
+                        </div>
+                         <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                            <h3 class="text-lg font-bold text-slate-800 mb-6">Share of Voice</h3>
+                            <div class="h-[300px] w-full relative">
+                                <canvas id="chart-overview-pie"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const getContentHTML = () => {
+                return `
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="text-lg font-bold text-slate-800">Format Performance (Avg. Reach)</h3>
+                                <div class="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-semibold">Video Dominance</div>
+                            </div>
+                            <div class="h-[300px]">
+                                <canvas id="chart-content-bar-reach"></canvas>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                            <div class="flex justify-between items-center mb-6">
+                                <h3 class="text-lg font-bold text-slate-800">Engagement Rate by Format</h3>
+                                <div class="bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full text-xs font-semibold">Quality Check</div>
+                            </div>
+                            <div class="h-[300px]">
+                                <canvas id="chart-content-bar-eng"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            };
+
+            const getAudienceHTML = () => {
+                 return `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                        <h3 class="text-lg font-bold text-slate-800 mb-6">Audience by Watch Behavior</h3>
+                        <div class="h-[300px] w-full relative">
+                            <canvas id="chart-audience-pie"></canvas>
+                        </div>
+                    </div>
+                    <div class="lg:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div class="bg-sky-50 p-6 rounded-xl border border-sky-100">
+                            <h4 class="font-semibold text-sky-800 mb-2">New Viewers</h4>
+                            <p class="text-3xl font-bold text-slate-800 mb-4">35%</p>
+                            <p class="text-sm text-sky-700 leading-relaxed">Most interested in <strong>Meme/Humor</strong> and <strong>Educational</strong> shorts. High churn rate.</p>
+                        </div>
+                        <div class="bg-violet-50 p-6 rounded-xl border border-violet-100">
+                            <h4 class="font-semibold text-violet-800 mb-2">Casual Viewers</h4>
+                            <p class="text-3xl font-bold text-slate-800 mb-4">45%</p>
+                            <p class="text-sm text-violet-700 leading-relaxed">Engage with <strong>Trends</strong> and <strong>Behind the Scenes</strong>. Irregular interaction.</p>
+                        </div>
+                        <div class="bg-emerald-50 p-6 rounded-xl border border-emerald-100">
+                            <h4 class="font-semibold text-emerald-800 mb-2">Regular Viewers</h4>
+                            <p class="text-3xl font-bold text-slate-800 mb-4">20%</p>
+                            <p class="text-sm text-emerald-700 leading-relaxed">Deeply engaged with <strong>Product Launches</strong> and <strong>Industry News</strong>.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm mt-6">
+                    <h3 class="text-lg font-bold text-slate-800 mb-6">Content Popularity by Viewer Type</h3>
+                    <div class="h-[350px] w-full">
+                        <canvas id="chart-audience-bar"></canvas>
+                    </div>
+                </div>
+                `;
+            };
+
+            // --- 1. DASHBOARD TAB ---
+            if (state.activeTab === 'dashboard') {
+                html = getDashboardHTML();
+            }
+
+            // --- 2. OVERVIEW TAB ---
+            else if (state.activeTab === 'overview') {
+                html = getOverviewHTML();
+            }
+
+            // --- 3. CONTENT TAB ---
+            else if (state.activeTab === 'content') {
+                 html = getContentHTML() + `
+                    <div class="bg-indigo-900 rounded-xl p-8 text-white relative overflow-hidden mt-6">
+                        <div class="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-8">
+                            <div class="md:col-span-2">
+                                <h2 class="text-2xl font-bold mb-4">Strategic Insight</h2>
+                                <p class="text-indigo-100 text-lg leading-relaxed mb-6">
+                                Your data indicates a significant opportunity with <strong>Reels</strong> on <strong>Instagram</strong> and <strong>Shorts</strong> on <strong>YouTube</strong>. 
+                                Video content is driving <strong>40% more reach</strong> per post than static images.
+                                </p>
+                                <button class="bg-white text-indigo-900 px-6 py-2.5 rounded-lg font-semibold hover:bg-indigo-50 transition-colors">
+                                View Detailed Plan
+                                </button>
+                            </div>
+                            <div class="hidden md:flex items-center justify-center">
+                                <div class="w-32 h-32 bg-indigo-500/30 rounded-full flex items-center justify-center backdrop-blur-sm">
+                                <i data-lucide="trending-up" class="w-12 h-12 text-white"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>`;
+            }
+
+            // --- 4. AUDIENCE TAB ---
+            else if (state.activeTab === 'audience') {
+                html = getAudienceHTML();
+            }
+
+            // --- 5. AI ANALYST TAB ---
+            else if (state.activeTab === 'ai') {
+                html = `
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
+                    <div class="lg:col-span-2 h-full flex flex-col bg-white rounded-xl border border-slate-100 shadow-sm">
+                         <div class="p-4 border-b border-slate-100 bg-slate-50 rounded-t-xl flex justify-between items-center">
+                            <div class="flex items-center gap-2">
+                                <div class="bg-indigo-600 p-1.5 rounded-lg">
+                                    <i data-lucide="zap" class="text-white w-5 h-5"></i>
+                                </div>
+                                <div>
+                                    <h3 class="font-semibold text-slate-800">AI Strategy Analyst</h3>
+                                    <p class="text-xs text-slate-500">Powered by Data Insights</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="chat-messages" class="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+                            ${state.chatMessages.map(msg => `
+                                <div class="flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}">
+                                    <div class="max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none shadow-md' : 'bg-white text-slate-700 border border-slate-200 rounded-tl-none shadow-sm'}">
+                                        ${msg.content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}
+                                    </div>
+                                </div>
+                            `).join('')}
+                            ${state.isChatTyping ? `
+                                <div class="flex justify-start">
+                                    <div class="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-2">
+                                        <div class="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
+                                        <div class="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 150ms"></div>
+                                        <div class="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style="animation-delay: 300ms"></div>
+                                    </div>
+                                </div>
+                            ` : ''}
+                        </div>
+                        <div class="p-4 border-t border-slate-100 bg-white rounded-b-xl">
+                            <div class="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-hide">
+                                <button onclick="sendChatQuery('Which content format has the best engagement?')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs rounded-full hover:bg-indigo-100 transition-colors border border-indigo-100">Which content format has the best engagement?</button>
+                                <button onclick="sendChatQuery('What was my highest performing post?')" class="whitespace-nowrap px-3 py-1.5 bg-indigo-50 text-indigo-700 text-xs rounded-full hover:bg-indigo-100 transition-colors border border-indigo-100">What was my highest performing post?</button>
+                            </div>
+                            <form onsubmit="handleChatSubmit(event)" class="relative">
+                                <input id="chat-input" type="text" placeholder="Ask about your social data..." class="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                                <button type="submit" class="absolute right-2 top-2 p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all">
+                                    <i data-lucide="arrow-up-right" class="w-5 h-5"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                            <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                                <i data-lucide="zap" class="text-amber-500 w-5 h-5"></i>
+                                Smart Suggestions
+                            </h3>
+                            <div class="space-y-3">
+                                <div class="p-3 bg-slate-50 rounded-lg text-sm text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors border border-transparent hover:border-slate-200">
+                                    <p class="font-medium text-slate-800 mb-1">YouTube Shorts</p>
+                                    Repost your top TikToks to YouTube Shorts to leverage existing assets.
+                                </div>
+                                <div class="p-3 bg-slate-50 rounded-lg text-sm text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors border border-transparent hover:border-slate-200">
+                                    <p class="font-medium text-slate-800 mb-1">LinkedIn Timing</p>
+                                    Posting between <strong>9 AM - 11 AM</strong> yields 15% higher engagement on LinkedIn.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+            }
+
+            // --- 6. PERFORMANCE TAB ---
+            else if (state.activeTab === 'performance') {
+                const postsHtml = filteredData.slice(0, 8).map(post => `
+                    <tr class="hover:bg-slate-50 transition-colors border-b border-slate-50">
+                        <td class="px-6 py-4 font-medium text-slate-800 truncate max-w-[200px]">${post.topic}</td>
+                        <td class="px-6 py-4">
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+                                ${post.platform}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4">${formatNumber(post.reach)}</td>
+                        <td class="px-6 py-4 text-right">
+                            <span class="${post.engagementRate > 5 ? 'text-emerald-600 font-semibold' : 'text-slate-600'}">
+                                ${post.engagementRate}%
+                            </span>
+                        </td>
+                    </tr>
+                `).join('');
+
+                html = `
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <div class="lg:col-span-2 bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden">
+                            <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+                                <h3 class="text-lg font-bold text-slate-800">Recent Content Details</h3>
+                                <button class="text-indigo-600 text-sm font-medium">View All</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm text-slate-600">
+                                    <thead class="bg-slate-50 text-xs uppercase font-semibold text-slate-500">
+                                        <tr>
+                                            <th class="px-6 py-4">Topic</th>
+                                            <th class="px-6 py-4">Platform</th>
+                                            <th class="px-6 py-4">Reach</th>
+                                            <th class="px-6 py-4 text-right">Engagement</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        ${postsHtml}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="space-y-6">
+                             <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm">
+                                <h3 class="font-bold text-slate-800 mb-4">Export Reports</h3>
+                                <p class="text-sm text-slate-500 mb-6">Download detailed performance breakdowns for your team or clients.</p>
+                                <button onclick="printFullReport()" class="w-full py-3 border border-slate-200 hover:border-indigo-600 hover:text-indigo-600 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2 group">
+                                    <i data-lucide="download" class="w-5 h-5 group-hover:scale-110 transition-transform"></i>
+                                    Download PDF Report
+                                </button>
+                             </div>
+                             <div class="bg-indigo-50 p-6 rounded-xl border border-indigo-100">
+                               <h3 class="font-bold text-indigo-900 mb-2">Weekly Summary</h3>
+                               <ul class="space-y-2 text-sm text-indigo-800">
+                                 <li class="flex items-start gap-2">
+                                   <span class="mt-1.5 w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                   Facebook reach up by 15%
+                                 </li>
+                                 <li class="flex items-start gap-2">
+                                   <span class="mt-1.5 w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                   YouTube Shorts driving new subs
+                                 </li>
+                                 <li class="flex items-start gap-2">
+                                   <span class="mt-1.5 w-1.5 h-1.5 bg-indigo-500 rounded-full"></span>
+                                   LinkedIn engagement stable
+                                 </li>
+                               </ul>
+                             </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // --- 7. FULL REPORT TAB (FOR PRINTING) ---
+            else if (state.activeTab === 'full_report') {
+                html = `
+                    <div class="space-y-12">
+                        <section>
+                            <h2 class="text-2xl font-bold text-slate-900 mb-6 pb-2 border-b border-slate-200">Executive Overview</h2>
+                            ${getOverviewHTML()}
+                        </section>
+                        <section>
+                            <h2 class="text-2xl font-bold text-slate-900 mb-6 pb-2 border-b border-slate-200">Channel Analytics</h2>
+                            ${getDashboardHTML()}
+                        </section>
+                        <section>
+                            <h2 class="text-2xl font-bold text-slate-900 mb-6 pb-2 border-b border-slate-200">Content Strategy</h2>
+                            ${getContentHTML()}
+                        </section>
+                        <section>
+                            <h2 class="text-2xl font-bold text-slate-900 mb-6 pb-2 border-b border-slate-200">Audience Insights</h2>
+                            ${getAudienceHTML()}
+                        </section>
+                    </div>
+                `;
+            }
+
+            contentArea.innerHTML = html;
+            lucide.createIcons();
+            
+            // --- INITIALIZE CHARTS AFTER RENDER ---
+            setTimeout(() => initCharts(filteredData), 0);
+            
+            // Scroll chat to bottom if open
+            if(state.activeTab === 'ai') {
+                const msgContainer = document.getElementById('chat-messages');
+                if(msgContainer) msgContainer.scrollTop = msgContainer.scrollHeight;
+            }
+        }
+
+        function renderKpiCard(title, value, change, icon, trend, colorClass) {
+            const trendColor = trend === 'up' ? 'text-emerald-600' : 'text-rose-600';
+            const trendIcon = trend === 'up' ? 'arrow-up-right' : 'arrow-down-right';
+            return `
+            <div class="bg-white p-6 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow">
+                <div class="flex justify-between items-start mb-4">
+                    <div class="p-2 rounded-lg ${colorClass}">
+                        <i data-lucide="${icon}" class="w-5 h-5"></i>
+                    </div>
+                    <span class="flex items-center text-sm font-medium ${trendColor}">
+                        <i data-lucide="${trendIcon}" class="w-4 h-4 mr-1"></i>
+                        ${change}
+                    </span>
+                </div>
+                <h3 class="text-slate-500 text-sm font-medium mb-1">${title}</h3>
+                <p class="text-2xl font-bold text-slate-800">${value}</p>
+            </div>`;
+        }
+
+        // --- CHART INITIALIZATION LOGIC ---
+
+        function initCharts(data) {
+            Chart.defaults.font.family = "'ui-sans-serif', 'system-ui', 'sans-serif'";
+            Chart.defaults.color = '#64748b';
+
+            if (state.activeTab === 'dashboard' || state.activeTab === 'full_report') {
+                const platforms = {};
+                data.forEach(d => platforms[d.platform] = (platforms[d.platform] || 0) + d.reach);
+                
+                const ctx = document.getElementById('chart-dashboard-bar').getContext('2d');
+                activeCharts.push(new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(platforms),
+                        datasets: [{
+                            label: 'Total Reach',
+                            data: Object.values(platforms),
+                            backgroundColor: ['#6366f1', '#ec4899', '#0ea5e9', '#10b981', '#f43f5e', '#3b82f6'],
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { display: false, grid: { display: false } }, x: { grid: { display: false } } }
+                    }
+                }));
+            }
+
+            if (state.activeTab === 'overview' || state.activeTab === 'full_report') {
+                // Area Chart
+                const dateMap = {};
+                data.forEach(d => dateMap[d.date] = (dateMap[d.date] || 0) + d.reach);
+                const sortedDates = Object.keys(dateMap).sort();
+                
+                const ctx1 = document.getElementById('chart-overview-area').getContext('2d');
+                const gradient = ctx1.createLinearGradient(0, 0, 0, 300);
+                gradient.addColorStop(0, 'rgba(14, 165, 233, 0.3)');
+                gradient.addColorStop(1, 'rgba(14, 165, 233, 0)');
+
+                activeCharts.push(new Chart(ctx1, {
+                    type: 'line',
+                    data: {
+                        labels: sortedDates.map(d => new Date(d).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})),
+                        datasets: [{
+                            label: 'Reach',
+                            data: sortedDates.map(d => dateMap[d]),
+                            borderColor: '#0ea5e9',
+                            backgroundColor: gradient,
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { display: false }, x: { grid: { display: false } } }
+                    }
+                }));
+
+                // Pie Chart
+                const pMap = {};
+                data.forEach(d => pMap[d.platform] = (pMap[d.platform] || 0) + d.reach);
+                const ctx2 = document.getElementById('chart-overview-pie').getContext('2d');
+                activeCharts.push(new Chart(ctx2, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(pMap),
+                        datasets: [{
+                            data: Object.values(pMap),
+                            backgroundColor: ['#6366f1', '#ec4899', '#0ea5e9', '#10b981', '#f43f5e', '#3b82f6'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '70%',
+                        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true, boxWidth: 8 } } }
+                    }
+                }));
+            }
+
+            if (state.activeTab === 'content' || state.activeTab === 'full_report') {
+                // Aggregating by format
+                const fMap = {};
+                data.forEach(d => {
+                    if(!fMap[d.format]) fMap[d.format] = { reach: 0, count: 0, engagement: 0 };
+                    fMap[d.format].reach += d.reach;
+                    fMap[d.format].engagement += d.engagementRate;
+                    fMap[d.format].count++;
+                });
+
+                const labels = Object.keys(fMap);
+                const reachData = labels.map(l => Math.round(fMap[l].reach / fMap[l].count));
+                const engData = labels.map(l => (fMap[l].engagement / fMap[l].count).toFixed(2));
+
+                // Horizontal Bar (Reach)
+                const ctx1 = document.getElementById('chart-content-bar-reach').getContext('2d');
+                activeCharts.push(new Chart(ctx1, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Avg Reach',
+                            data: reachData,
+                            backgroundColor: reachData.map(v => v > 4000 ? '#4f46e5' : '#a5b4fc'),
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { x: { display: false }, y: { grid: { display: false } } }
+                    }
+                }));
+
+                // Vertical Bar (Engagement)
+                const ctx2 = document.getElementById('chart-content-bar-eng').getContext('2d');
+                activeCharts.push(new Chart(ctx2, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Avg Engagement %',
+                            data: engData,
+                            backgroundColor: '#ec4899',
+                            borderRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: { y: { display: false }, x: { grid: { display: false } } }
+                    }
+                }));
+            }
+
+            if (state.activeTab === 'audience' || state.activeTab === 'full_report') {
+                // Mock Audience Data
+                const ctx1 = document.getElementById('chart-audience-pie').getContext('2d');
+                activeCharts.push(new Chart(ctx1, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['New Viewers', 'Casual Viewers', 'Regular Viewers'],
+                        datasets: [{
+                            data: [35, 45, 20],
+                            backgroundColor: ['#0ea5e9', '#8b5cf6', '#10b981'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '70%',
+                        plugins: { legend: { position: 'bottom', labels: { usePointStyle: true } } }
+                    }
+                }));
+
+                const ctx2 = document.getElementById('chart-audience-bar').getContext('2d');
+                activeCharts.push(new Chart(ctx2, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Product Launch', 'Educational', 'Meme/Humor', 'Industry News'],
+                        datasets: [
+                            { label: 'New Viewers', data: [20, 80, 90, 15], backgroundColor: '#0ea5e9' },
+                            { label: 'Casual Viewers', data: [45, 60, 50, 30], backgroundColor: '#8b5cf6' },
+                            { label: 'Regular Viewers', data: [90, 40, 20, 85], backgroundColor: '#10b981' }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { position: 'top' } },
+                        scales: { y: { display: false }, x: { grid: { display: false } } },
+                        borderRadius: 4
+                    }
+                }));
+            }
+        }
+
+        // --- ACTIONS ---
+
+        function setTab(id) {
+            state.activeTab = id;
+            updateUI();
+        }
+
+        function toggleSidebar() {
+            state.isSidebarOpen = !state.isSidebarOpen;
+            renderSidebar(); // Only re-render sidebar class/width
+        }
+
+        function setTimeRange(val) {
+            state.timeRange = parseInt(val);
+            updateUI();
+        }
+
+        function setPlatform(val) {
+            state.selectedPlatform = val;
+            updateUI();
+        }
+
+        function printFullReport() {
+            state.activeTab = 'full_report';
+            updateUI();
+            setTimeout(() => {
+                window.print();
+            }, 800);
+        }
+
+        // --- CHAT LOGIC ---
+
+        function handleChatSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            sendChatQuery(input.value);
+            input.value = '';
+        }
+
+        function sendChatQuery(text) {
+            if(!text.trim()) return;
+            
+            // Add user message
+            state.chatMessages.push({ role: 'user', content: text });
+            state.isChatTyping = true;
+            renderContent(); // Re-render to show new message
+
+            // Mock AI Response
+            setTimeout(() => {
+                const response = generateAIResponse(text);
+                state.chatMessages.push({ role: 'system', content: response });
+                state.isChatTyping = false;
+                renderContent(); // Re-render with response
+            }, 1200);
+        }
+
+        function generateAIResponse(question) {
+            const data = getFilteredData();
+            const lowerQ = question.toLowerCase();
+            
+            if (lowerQ.includes('best') && (lowerQ.includes('format') || lowerQ.includes('type'))) {
+                return "Based on your recent data, **Reels** are your top performing format with an average engagement rate of **6.4%**. You should prioritize this format.";
+            }
+            if (lowerQ.includes('highest') && lowerQ.includes('engagement')) {
+                return "Your highest performing post was a **Reel** about **Product Launch** on Instagram. It achieved an engagement rate of **8.2%**.";
+            }
+            if (lowerQ.includes('platform')) {
+                return "**Instagram** is currently driving the most visibility, accounting for the majority of your total reach.";
+            }
+            return "I've analyzed your dashboard. Try asking specific questions like 'Which format performs best?', or 'Compare platforms'.";
+        }
+
+        // --- MAIN RENDER LOOP ---
+
+        function updateUI() {
+            renderSidebar();
+            renderHeader();
+            renderContent();
+        }
+
+        // --- INIT ---
+        window.onload = () => {
+            updateUI();
+        };
+
+    </script>
+</body>
+</html>
